@@ -1,0 +1,43 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<osm version="0.6" generator="overpass-turbo">
+  <bounds minlat="48.0749" minlon="7.3506" maxlat="48.0768" maxlon="7.3554"/>
+  <node id="1001" lat="48.07580" lon="7.35094"/>
+  <node id="1002" lat="48.07564" lon="7.35297"/>
+  <node id="1003" lat="48.07522" lon="7.35329"/>
+  <node id="1004" lat="48.07497" lon="7.35218"/>
+  <node id="1005" lat="48.07538" lon="7.35061"/>
+  <node id="1006" lat="48.07636" lon="7.35398"/>
+  <node id="1007" lat="48.07646" lon="7.35508"/>
+  <node id="1008" lat="48.07605" lon="7.35528"/>
+  <node id="1009" lat="48.07572" lon="7.35438"/>
+  <node id="1010" lat="48.07592" lon="7.35321"/>
+  <node id="1011" lat="48.07547" lon="7.35227"/>
+  <way id="2001">
+    <nd ref="1001"/>
+    <nd ref="1002"/>
+    <nd ref="1003"/>
+    <nd ref="1004"/>
+    <nd ref="1005"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Rue des Clefs"/>
+    <tag k="maxspeed" v="30"/>
+  </way>
+  <way id="2002">
+    <nd ref="1006"/>
+    <nd ref="1007"/>
+    <nd ref="1008"/>
+    <nd ref="1009"/>
+    <nd ref="1010"/>
+    <tag k="highway" v="tertiary"/>
+    <tag k="name" v="Rue des Marchands"/>
+    <tag k="maxspeed" v="50"/>
+  </way>
+  <way id="2003">
+    <nd ref="1010"/>
+    <nd ref="1011"/>
+    <nd ref="1002"/>
+    <tag k="highway" v="residential"/>
+    <tag k="oneway" v="yes"/>
+    <tag k="name" v="Rue Mercière"/>
+  </way>
+</osm>
