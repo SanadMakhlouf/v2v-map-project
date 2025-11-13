@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <QToolButton>
 #include <QStyle>
+#include <QTimer>
 
 #include "RoadGraphLoader.h"
 
@@ -69,7 +70,52 @@ void MapView::setCenterLatLon(double lat, double lon, int zoom, bool preserveIfO
     for (auto it = m_tileItems.begin(); it != m_tileItems.end(); ++it) {
         it->stillNeeded = false;
     }
-    loadVisibleTiles();
+    
+    // Calculer le centre de la scène à partir des coordonnées mises à jour
+    QPointF centerScene = lonLatToScene(m_centerLon, m_centerLat, m_zoom);
+    loadVisibleTiles(centerScene);
+    reloadRoadGraphics();
+    reloadVehicleGraphics();
+    updateZoomButtons();
+}
+
+void MapView::zoomToLevel(int newZoom) {
+    if (newZoom == m_zoom || newZoom < 0 || newZoom > 19) {
+        return;
+    }
+    
+    // Obtenir le centre actuel de la vue en coordonnées scène (avec l'ancien zoom)
+    QPointF currentCenterScene = mapToScene(viewport()->rect().center());
+    
+    // Convertir en coordonnées géographiques avec l'ancien zoom
+    QPointF centerLatLon = sceneToLonLat(currentCenterScene, m_zoom);
+    double lat = clampLatitude(centerLatLon.y());
+    double lon = normalizeLongitude(centerLatLon.x());
+    
+    // Mettre à jour le zoom AVANT de recalculer
+    m_zoom = newZoom;
+    m_centerLat = lat;
+    m_centerLon = lon;
+    
+    clearRoadGraphics();
+    clearVehicleGraphics();
+    for (auto it = m_tileItems.begin(); it != m_tileItems.end(); ++it) {
+        it->stillNeeded = false;
+    }
+    
+    // Recalculer le centre de la scène avec le NOUVEAU zoom
+    // Cette conversion doit être faite avec le nouveau zoom
+    QPointF newCenterScene = lonLatToScene(lon, lat, m_zoom);
+    
+    // Charger les tuiles (loadVisibleTiles va appeler centerOn, mais on va le refaire après pour être sûr)
+    loadVisibleTiles(newCenterScene);
+    
+    // Forcer le centrage après que tout soit chargé
+    // Utiliser QTimer::singleShot pour s'assurer que c'est fait après le rendu
+    QTimer::singleShot(0, this, [this, newCenterScene]() {
+        centerOn(newCenterScene);
+    });
+    
     reloadRoadGraphics();
     reloadVehicleGraphics();
     updateZoomButtons();
@@ -88,9 +134,32 @@ void MapView::wheelEvent(QWheelEvent* event) {
         return;
     }
 
-    QPointF viewCenter = mapToScene(viewport()->rect().center());
-    QPointF centerLatLon = sceneToLonLat(viewCenter, m_zoom);
-    setCenterLatLon(centerLatLon.y(), centerLatLon.x(), newZoom);
+    // Pour le zoom molette, on veut zoomer sur le point sous le curseur
+    QPointF cursorPos = mapToScene(event->position().toPoint());
+    QPointF cursorLatLon = sceneToLonLat(cursorPos, m_zoom);
+    
+    // Mettre à jour le zoom et les coordonnées
+    m_zoom = newZoom;
+    m_centerLat = cursorLatLon.y();
+    m_centerLon = cursorLatLon.x();
+    
+    // Normaliser les coordonnées
+    m_centerLat = clampLatitude(m_centerLat);
+    m_centerLon = normalizeLongitude(m_centerLon);
+    
+    clearRoadGraphics();
+    clearVehicleGraphics();
+    for (auto it = m_tileItems.begin(); it != m_tileItems.end(); ++it) {
+        it->stillNeeded = false;
+    }
+    
+    // Calculer le nouveau centre de la scène avec le nouveau zoom
+    QPointF newCenterScene = lonLatToScene(m_centerLon, m_centerLat, m_zoom);
+    loadVisibleTiles(newCenterScene);
+    reloadRoadGraphics();
+    reloadVehicleGraphics();
+    updateZoomButtons();
+    
     event->accept();
 }
 
@@ -162,19 +231,19 @@ QPointF MapView::sceneToLonLat(const QPointF& scenePoint, int z) const {
     return QPointF(lon, lat);
 }
 
-void MapView::loadVisibleTiles() {
+void MapView::loadVisibleTiles(const QPointF& centerScene) {
     for (auto it = m_tileItems.begin(); it != m_tileItems.end(); ++it) {
         it->stillNeeded = false;
     }
-    QPointF centerScene = lonLatToScene(m_centerLon, m_centerLat, m_zoom);
+    QPointF actualCenterScene = centerScene.isNull() ? lonLatToScene(m_centerLon, m_centerLat, m_zoom) : centerScene;
     double tilesAcross = viewport()->width() / static_cast<double>(TILE_SIZE);
     double tilesDown = viewport()->height() / static_cast<double>(TILE_SIZE);
     int rangeX = static_cast<int>(std::ceil(tilesAcross / 2.0)) + 1;
     int rangeY = static_cast<int>(std::ceil(tilesDown / 2.0)) + 1;
     int range = std::max(rangeX, rangeY);
     range = std::clamp(range, 2, 6);
-    double cxTile = centerScene.x() / TILE_SIZE;
-    double cyTile = centerScene.y() / TILE_SIZE;
+    double cxTile = actualCenterScene.x() / TILE_SIZE;
+    double cyTile = actualCenterScene.y() / TILE_SIZE;
     for (int dx = -range; dx <= range; ++dx) {
         for (int dy = -range; dy <= range; ++dy) {
             int tx = int(std::floor(cxTile)) + dx;
@@ -211,7 +280,14 @@ void MapView::loadVisibleTiles() {
             ++it;
         }
     }
-    centerOn(centerScene);
+    // Centrer seulement si un centre n'a pas été fourni explicitement
+    // (si centerScene est null, c'est qu'on appelle depuis setCenterLatLon normal)
+    if (centerScene.isNull()) {
+        centerOn(actualCenterScene);
+    } else {
+        // Si un centre a été fourni, l'utiliser (appel depuis zoomToLevel)
+        centerOn(actualCenterScene);
+    }
     updateZoomButtons();
 }
 
@@ -437,7 +513,7 @@ void MapView::createZoomControls() {
     m_zoomInButton->setAutoRaise(true);
     m_zoomInButton->setToolTip(tr("Zoom in"));
     connect(m_zoomInButton, &QToolButton::clicked, [this]() {
-        setCenterLatLon(m_centerLat, m_centerLon, std::min(19, m_zoom + 1));
+        zoomToLevel(std::min(19, m_zoom + 1));
     });
 
     m_zoomOutButton = new QToolButton(this);
@@ -445,7 +521,7 @@ void MapView::createZoomControls() {
     m_zoomOutButton->setAutoRaise(true);
     m_zoomOutButton->setToolTip(tr("Zoom out"));
     connect(m_zoomOutButton, &QToolButton::clicked, [this]() {
-        setCenterLatLon(m_centerLat, m_centerLon, std::max(0, m_zoom - 1));
+        zoomToLevel(std::max(0, m_zoom - 1));
     });
 
     positionZoomControls();

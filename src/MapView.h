@@ -20,6 +20,7 @@ public:
     MapView(QWidget* parent = nullptr);
     ~MapView() override;
     void setCenterLatLon(double lat, double lon, int zoom, bool preserveIfOutOfBounds = false);
+    void zoomToLevel(int newZoom);
     bool loadRoadGraphFromFile(const QString& filePath);
 
 protected:
@@ -57,7 +58,7 @@ private:
 
     QPointF lonLatToScene(double lon, double lat, int z);
     QPointF sceneToLonLat(const QPointF& scenePoint, int z) const;
-    void loadVisibleTiles();
+    void loadVisibleTiles(const QPointF& centerScene = QPointF());
     void reloadRoadGraphics();
     void clearRoadGraphics();
     void generateVehicles(int count);
