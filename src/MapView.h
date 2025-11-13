@@ -33,6 +33,7 @@ protected:
 
 private slots:
     void onTileReady(int z, int x, int y, const QPixmap& pix);
+    void onLoadOsmClicked();
 
 private:
     struct TileInfo {
@@ -50,7 +51,10 @@ private:
     double m_centerLat = 47.750839;
     double m_centerLon = 7.335888;
     QPoint m_lastPan;
+    QPoint m_panStartPos;
     bool m_panning = false;
+    double m_panStartCenterLat = 0.0;
+    double m_panStartCenterLon = 0.0;
 
     QVector<QGraphicsLineItem*> m_roadGraphics;
     QVector<QGraphicsEllipseItem*> m_vehicleGraphics;
@@ -77,6 +81,7 @@ private:
 
     QToolButton* m_zoomInButton = nullptr;
     QToolButton* m_zoomOutButton = nullptr;
+    QToolButton* m_loadOsmButton = nullptr;
     void createZoomControls();
     void positionZoomControls();
     void updateZoomButtons();

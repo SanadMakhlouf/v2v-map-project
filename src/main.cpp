@@ -1,6 +1,6 @@
 
 #include <QApplication>
-#include <QFileDialog>
+#include <QTimer>
 
 #include "MapView.h"
 
@@ -9,16 +9,12 @@ int main(int argc, char** argv) {
     MapView view;
     view.resize(800,600);
     view.show();
-    view.setCenterLatLon(47.75, 7.335888, 13);
 
-    QString osmPath = QFileDialog::getOpenFileName(
-        &view,
-        QObject::tr("Ouvrir un fichier OSM"),
-        QString(),
-        QObject::tr("Fichiers OSM (*.osm);;Tous les fichiers (*.*)"));
-    if (!osmPath.isEmpty()) {
-        view.loadRoadGraphFromFile(osmPath);
-    }
+    // Utiliser un timer pour s'assurer que le widget est complètement rendu avant de définir le centre
+    QTimer::singleShot(0, &view, [&view]() {
+        view.setCenterLatLon(47.75, 7.335888, 14);
+       // view.setCenterLatLon(48.8566, 2.3522, 5); // paris
+    });
 
     return app.exec();
 }

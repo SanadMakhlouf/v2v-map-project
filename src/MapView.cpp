@@ -19,6 +19,7 @@
 #include <QToolButton>
 #include <QStyle>
 #include <QTimer>
+#include <QFileDialog>
 
 #include "RoadGraphLoader.h"
 
@@ -29,7 +30,7 @@ MapView::MapView(QWidget* parent) : QGraphicsView(parent), m_scene(new QGraphics
     setRenderHint(QPainter::Antialiasing, true);
     connect(&m_tileManager, &TileManager::tileReady, this, &MapView::onTileReady);
     createZoomControls();
-    loadVisibleTiles();
+    // Ne pas charger les tuiles ici - laisser setCenterLatLon le faire après que le widget soit rendu
 }
 
 MapView::~MapView() {
@@ -77,10 +78,35 @@ void MapView::setCenterLatLon(double lat, double lon, int zoom, bool preserveIfO
     reloadRoadGraphics();
     reloadVehicleGraphics();
     updateZoomButtons();
+    
+    // Appeler centerOn immédiatement si le viewport est prêt
+    if (viewport() && viewport()->width() > 0 && viewport()->height() > 0) {
+        centerOn(centerScene);
+    }
+    
+    // Utiliser un timer pour s'assurer que centerOn est appelé après le rendu complet
+    // Utiliser un petit délai pour garantir que toutes les tuiles sont positionnées
+    QTimer::singleShot(50, this, [this, centerScene]() {
+        if (viewport() && viewport()->width() > 0 && viewport()->height() > 0) {
+            centerOn(centerScene);
+        }
+    });
 }
 
 void MapView::zoomToLevel(int newZoom) {
     if (newZoom == m_zoom || newZoom < 0 || newZoom > 19) {
+        return;
+    }
+
+    // Vérifier que le viewport est valide avant de calculer les coordonnées
+    if (!viewport() || viewport()->width() <= 0 || viewport()->height() <= 0) {
+        // Si le viewport n'est pas prêt, utiliser simplement les coordonnées géographiques actuelles
+        m_zoom = newZoom;
+        QPointF newCenterScene = lonLatToScene(m_centerLon, m_centerLat, m_zoom);
+        loadVisibleTiles(newCenterScene);
+        reloadRoadGraphics();
+        reloadVehicleGraphics();
+        updateZoomButtons();
         return;
     }
 
@@ -123,6 +149,12 @@ void MapView::zoomToLevel(int newZoom) {
 
 
 void MapView::wheelEvent(QWheelEvent* event) {
+    // Vérifier que le viewport est valide
+    if (!viewport() || viewport()->width() <= 0 || viewport()->height() <= 0) {
+        QGraphicsView::wheelEvent(event);
+        return;
+    }
+
     int newZoom = m_zoom;
     if (event->angleDelta().y() > 0)
         newZoom = std::min(19, m_zoom + 1);
@@ -137,28 +169,13 @@ void MapView::wheelEvent(QWheelEvent* event) {
     // Pour le zoom molette, on veut zoomer sur le point sous le curseur
     QPointF cursorPos = mapToScene(event->position().toPoint());
     QPointF cursorLatLon = sceneToLonLat(cursorPos, m_zoom);
-
-    // Mettre à jour le zoom et les coordonnées
-    m_zoom = newZoom;
-    m_centerLat = cursorLatLon.y();
-    m_centerLon = cursorLatLon.x();
-
+    
     // Normaliser les coordonnées
-    m_centerLat = clampLatitude(m_centerLat);
-    m_centerLon = normalizeLongitude(m_centerLon);
+    double lat = clampLatitude(cursorLatLon.y());
+    double lon = normalizeLongitude(cursorLatLon.x());
 
-    clearRoadGraphics();
-    clearVehicleGraphics();
-    for (auto it = m_tileItems.begin(); it != m_tileItems.end(); ++it) {
-        it->stillNeeded = false;
-    }
-
-    // Calculer le nouveau centre de la scène avec le nouveau zoom
-    QPointF newCenterScene = lonLatToScene(m_centerLon, m_centerLat, m_zoom);
-    loadVisibleTiles(newCenterScene);
-    reloadRoadGraphics();
-    reloadVehicleGraphics();
-    updateZoomButtons();
+    // Utiliser setCenterLatLon pour la synchronisation complète
+    setCenterLatLon(lat, lon, newZoom);
 
     event->accept();
 }
@@ -168,6 +185,10 @@ void MapView::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
         m_panning = true;
         m_lastPan = event->pos();
+        m_panStartPos = event->pos();
+        // Stocker le centre géographique au début du déplacement
+        m_panStartCenterLat = m_centerLat;
+        m_panStartCenterLon = m_centerLon;
         setCursor(Qt::ClosedHandCursor);
     }
     QGraphicsView::mousePressEvent(event);
@@ -189,15 +210,40 @@ void MapView::mouseReleaseEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
         m_panning = false;
         setCursor(Qt::ArrowCursor);
-        QPointF sceneCenter = mapToScene(viewport()->rect().center());
-        QPointF lonLat = sceneToLonLat(sceneCenter, m_zoom);
-        setCenterLatLon(lonLat.y(), lonLat.x(), m_zoom);
+        
+        // Calculer le déplacement total en pixels depuis le début du drag
+        QPoint currentPos = event->pos();
+        QPoint delta = currentPos - m_panStartPos;
+        
+        // Convertir le déplacement en pixels en déplacement géographique
+        // On calcule toujours à partir du déplacement en pixels pour plus de fiabilité
+        if (viewport() && viewport()->width() > 0 && viewport()->height() > 0) {
+            // Calculer le centre de la scène au début du drag
+            QPointF startSceneCenter = lonLatToScene(m_panStartCenterLon, m_panStartCenterLat, m_zoom);
+            
+            // Calculer le nouveau centre de la scène après le déplacement (delta est inversé car on déplace la vue)
+            QPointF newSceneCenter = startSceneCenter - QPointF(delta.x(), delta.y());
+            
+            // Convertir le nouveau centre de la scène en coordonnées géographiques
+            QPointF newLonLat = sceneToLonLat(newSceneCenter, m_zoom);
+            
+            // Vérifier que les coordonnées sont valides
+            if (newLonLat.x() >= -180 && newLonLat.x() <= 180 && 
+                newLonLat.y() >= -85 && newLonLat.y() <= 85) {
+                setCenterLatLon(newLonLat.y(), newLonLat.x(), m_zoom);
+            }
+        }
     }
     QGraphicsView::mouseReleaseEvent(event);
 }
 
 void MapView::mouseDoubleClickEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
+        // Vérifier que le viewport est valide avant de calculer les coordonnées
+        if (!viewport() || viewport()->width() <= 0 || viewport()->height() <= 0) {
+            QGraphicsView::mouseDoubleClickEvent(event);
+            return;
+        }
         QPointF scenePos = mapToScene(event->pos());
         QPointF lonLat = sceneToLonLat(scenePos, m_zoom);
         int targetZoom = (m_zoom < 19) ? m_zoom + 1 : m_zoom;
@@ -232,6 +278,11 @@ QPointF MapView::sceneToLonLat(const QPointF& scenePoint, int z) const {
 }
 
 void MapView::loadVisibleTiles(const QPointF& centerScene) {
+    // Vérifier que le viewport est valide
+    if (!viewport() || viewport()->width() <= 0 || viewport()->height() <= 0) {
+        return;
+    }
+
     for (auto it = m_tileItems.begin(); it != m_tileItems.end(); ++it) {
         it->stillNeeded = false;
     }
@@ -265,7 +316,7 @@ void MapView::loadVisibleTiles(const QPointF& centerScene) {
                 info.stillNeeded = true;
                 info.loading = true;
                 m_tileItems.insert(key, info);
-                m_tileManager.requestTile(m_zoom, tx, ty);
+            m_tileManager.requestTile(m_zoom, tx, ty);
             }
         }
     }
@@ -281,13 +332,12 @@ void MapView::loadVisibleTiles(const QPointF& centerScene) {
         }
     }
     // Centrer seulement si un centre n'a pas été fourni explicitement
-    // (si centerScene est null, c'est qu'on appelle depuis setCenterLatLon normal)
+    // (si centerScene est null, c'est qu'on appelle depuis le constructeur ou autre)
+    // Si un centerScene est fourni, laisser l'appelant (setCenterLatLon ou zoomToLevel) gérer le centrage
     if (centerScene.isNull()) {
         centerOn(actualCenterScene);
-    } else {
-        // Si un centre a été fourni, l'utiliser (appel depuis zoomToLevel)
-        centerOn(actualCenterScene);
     }
+    // Sinon, ne pas appeler centerOn ici - l'appelant le fera avec un timer pour garantir le bon timing
     updateZoomButtons();
 }
 
@@ -524,12 +574,19 @@ void MapView::createZoomControls() {
         zoomToLevel(std::max(0, m_zoom - 1));
     });
 
+    // Bouton pour charger un fichier OSM
+    m_loadOsmButton = new QToolButton(this);
+    m_loadOsmButton->setText("📁");
+    m_loadOsmButton->setAutoRaise(true);
+    m_loadOsmButton->setToolTip(tr("Charger un fichier OSM"));
+    connect(m_loadOsmButton, &QToolButton::clicked, this, &MapView::onLoadOsmClicked);
+
     positionZoomControls();
     updateZoomButtons();
 }
 
 void MapView::positionZoomControls() {
-    if (!m_zoomInButton || !m_zoomOutButton) return;
+    if (!m_zoomInButton || !m_zoomOutButton || !m_loadOsmButton) return;
 
     const int margin = 12;
     QSize buttonSize = QSize(28, 28);
@@ -541,10 +598,27 @@ void MapView::positionZoomControls() {
     QPoint outPos = basePos + QPoint(0, buttonSize.height() + 6);
     m_zoomOutButton->move(outPos);
     m_zoomOutButton->resize(buttonSize);
+
+    // Positionner le bouton OSM en dessous du bouton zoom out
+    QPoint osmPos = outPos + QPoint(0, buttonSize.height() + 6);
+    m_loadOsmButton->move(osmPos);
+    m_loadOsmButton->resize(buttonSize);
 }
 
 void MapView::updateZoomButtons() {
     if (!m_zoomInButton || !m_zoomOutButton) return;
     m_zoomInButton->setEnabled(m_zoom < 19);
     m_zoomOutButton->setEnabled(m_zoom > 0);
+}
+
+void MapView::onLoadOsmClicked() {
+    QString osmPath = QFileDialog::getOpenFileName(
+        this,
+        tr("Ouvrir un fichier OSM"),
+        QString(),
+        tr("Fichiers OSM (*.osm *.osm.pbf);;Tous les fichiers (*.*)"));
+    
+    if (!osmPath.isEmpty()) {
+        loadRoadGraphFromFile(osmPath);
+    }
 }
