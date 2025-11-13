@@ -9,7 +9,7 @@ int main(int argc, char** argv) {
     MapView view;
     view.resize(800,600);
     view.show();
-    view.setCenterLatLon(47.750839, 7.335888, 13);
+    view.setCenterLatLon(47.75, 7.335888, 13);
 
     QString osmPath = QFileDialog::getOpenFileName(
         &view,
