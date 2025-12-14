@@ -24,6 +24,7 @@ add_executable(v2v_map
   src/OSMDownloader.cpp
   src/OSMDownloader.h
   src/Vehicle.h
+  src/V2VMessage.h
 )
 
 target_link_libraries(v2v_map PRIVATE Qt6::Widgets Qt6::Network)
